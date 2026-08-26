@@ -78,11 +78,11 @@ function getBackendUrl(){
   return CONFIG.backendUrl||settings.backendUrl||'';
 }
 
-// 既存メンバーの会社フィルタ（詳細画面で使用）
-function loadCompatFilter(){try{return JSON.parse(localStorage.getItem('yst-compat-filter'))||{};}catch(e){return {};}}
-function saveCompatFilter(f){localStorage.setItem('yst-compat-filter',JSON.stringify(f));}
-function toggleCompatCompany(c){const f=loadCompatFilter();f[c]=!f[c];saveCompatFilter(f);render();}
-function resetCompatFilter(){localStorage.removeItem('yst-compat-filter');render();}
+// 既存メンバーの会社フィルタ（詳細画面で使用）: {会社名:true}=非表示
+function loadCompatFilter(){try{return JSON.parse(localStorage.getItem('yst-compat-hide'))||{};}catch(e){return {};}}
+function saveCompatFilter(f){try{localStorage.setItem('yst-compat-hide',JSON.stringify(f));}catch(e){}}
+function toggleCompatCompany(c){const f=loadCompatFilter();if(f[c])delete f[c];else f[c]=true;saveCompatFilter(f);render();}
+function resetCompatFilter(){try{localStorage.removeItem('yst-compat-hide');}catch(e){}render();}
 function isLoggedIn(){return !!(settings&&settings.userName&&settings.loginAt);}
 
 function loadSettings(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY))||{};}catch(e){return{};}}
@@ -118,7 +118,8 @@ async function syncBoth(){
 }
 
 async function syncPush(){
-  if(!settings.backendUrl){sync.pendingPush=false;return;}
+  const _url=getBackendUrl();
+  if(!_url){sync.pendingPush=false;return;}
   sync.syncing=true;sync.pendingPush=false;updateSyncBadge();
   try{
     const body={action:'sync',submissions:state.submissions,members:state.members,user:settings.userName||'unknown',ts:new Date().toISOString()};
@@ -516,11 +517,14 @@ function saveState(){
   const now=new Date().toISOString();const u=settings.userName||'unknown';
   state.submissions.forEach(s=>{if(!s.updatedAt){s.updatedAt=now;s.updatedBy=u;}});
   state.members.forEach(m=>{if(!m.updatedAt){m.updatedAt=now;m.updatedBy=u;}});
-  localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+  try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch(e){}
   if(MODE==='admin'&&getBackendUrl())schedulePush();
 }
 // 編集時に呼ぶ - 強制的にupdatedAtを更新
 function touchEntity(entity){if(entity){entity.updatedAt=new Date().toISOString();entity.updatedBy=settings.userName||'unknown';}}
+// 削除フラグ(deleted:true)を除いた表示用リスト。物理削除すると同期で復活するため、削除はフラグ方式
+function activeSubmissions(){return state.submissions.filter(s=>s&&!s.deleted);}
+function activeMembers(){return state.members.filter(m=>m&&!m.deleted);}
 function uuid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 
 // 既存メンバー初期データ（議事録ベース）
@@ -729,7 +733,7 @@ function renderLogin(){
         <button class="btn-primary btn-block" onclick="doLogin()">ログイン →</button>
         ${getBackendUrl()?`<p style="font-size:11px;color:#10B981;margin:12px 0 0;text-align:center;">✓ チーム共有モード（全員でデータを共有）</p>`:`<p style="font-size:11px;color:#F59E0B;margin:12px 0 0;text-align:center;">⚠ バックエンド未設定</p>`}
       </div>
-      <div style="text-align:center;margin-top:20px;font-size:11px;color:#9CA3AF;">${esc(CONFIG.appName)} v7.5<br>© YS Talent</div>
+      <div style="text-align:center;margin-top:20px;font-size:11px;color:#9CA3AF;">${esc(CONFIG.appName)} v7.6<br>© YS Talent</div>
     </div>
   </div>`;
 }
@@ -1084,16 +1088,18 @@ function calcOvertimeStats(s){
 }
 
 function dedupCleanup(){
-  const before=state.submissions.length;
-  const ded=dedupSubmissions(state.submissions);
-  const removed=before-ded.length;
-  if(removed===0){alert('重複は見つかりませんでした');return;}
-  if(!confirm(removed+'件の重複を削除します。続行しますか？'))return;
-  state.submissions=ded;saveState();render();alert(removed+'件削除しました');
+  const act=activeSubmissions();
+  const keep=new Set(dedupSubmissions(act).map(s=>s.id));
+  const dups=act.filter(s=>!keep.has(s.id));
+  if(dups.length===0){alert('重複は見つかりませんでした');return;}
+  if(!confirm(dups.length+'件の重複を削除します。続行しますか？'))return;
+  dups.forEach(s=>{s.deleted=true;touchEntity(s);});
+  saveState();render();alert(dups.length+'件削除しました');
 }
 
 function renderListView(){
-  if(state.submissions.length===0)return `
+  const subs=activeSubmissions();
+  if(subs.length===0)return `
     <div class="card" style="text-align:center;padding:40px 20px;">
       <div style="font-size:48px;margin-bottom:12px;">📋</div>
       <h3 style="margin:0 0 8px;">提出データがまだありません</h3>
@@ -1104,11 +1110,11 @@ function renderListView(){
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <div>
         <h2 style="font-size:20px;font-weight:700;margin:0 0 4px;">提出一覧</h2>
-        <p style="font-size:13px;color:#6B7280;margin:0;">候補者が提出したセルフ診断結果（${dedupSubmissions(state.submissions).length}名 / 全${state.submissions.length}件） <button class="btn-secondary" style="font-size:11px;padding:4px 10px;margin-left:8px;" onclick="dedupCleanup()">🧹 重複整理</button></p>
+        <p style="font-size:13px;color:#6B7280;margin:0;">候補者が提出したセルフ診断結果（${dedupSubmissions(subs).length}名 / 全${subs.length}件） <button class="btn-secondary" style="font-size:11px;padding:4px 10px;margin-left:8px;" onclick="dedupCleanup()">🧹 重複整理</button></p>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
-    ${dedupSubmissions(state.submissions).map(s=>{
+    ${dedupSubmissions(subs).map(s=>{
       const sc=calcScores(s.answers);
       const total=avg(Object.values(sc.traits));
       const flags=detectFlags(sc,(typeof s!=="undefined"?s.answers:null));
@@ -1134,17 +1140,17 @@ function renderListView(){
 }
 
 function renderDetail(){
-  const s=state.submissions.find(x=>x.id===currentId);
+  const s=state.submissions.find(x=>x.id===currentId&&!x.deleted);
   if(!s)return `<button onclick="setView('list')" style="color:#C45A95;background:none;border:none;cursor:pointer;">← 一覧に戻る</button><p>見つかりません</p>`;
   const sc=calcScores(s.answers);
   const total=avg(Object.values(sc.traits));
   const flags=detectFlags(sc,(typeof s!=="undefined"?s.answers:null));
-  // 会社フィルタを適用
-  const compatFilter=loadCompatFilter();
-  const allCompanies=[...new Set(state.members.map(m=>m.company||'(未設定)'))];
-  // フィルタが空 or 全部false の場合は全表示、trueが1つでもあれば選択されたものだけ
-  const hasFilter=Object.values(compatFilter).some(v=>v===true);
-  const filteredMembers=hasFilter?state.members.filter(m=>compatFilter[m.company||'(未設定)']):state.members;
+  // 会社フィルタを適用（{会社名:true}=非表示。クリックで表示/非表示をトグル）
+  const compatHide=loadCompatFilter();
+  const members=activeMembers();
+  const allCompanies=[...new Set(members.map(m=>m.company||'(未設定)'))];
+  const hasHidden=allCompanies.some(c=>compatHide[c]);
+  const filteredMembers=members.filter(m=>!compatHide[m.company||'(未設定)']);
   const compats=filteredMembers.map(m=>({m,r:calcCompatibility(sc,m)})).sort((a,b)=>b.r.score-a.r.score);
   // セクションごとに回答整理
   const bySection={};
@@ -1220,16 +1226,17 @@ function renderDetail(){
 
   <div class="card" style="margin-bottom:16px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-      <h3 style="font-size:14px;font-weight:700;margin:0;">🔗 既存メンバーとの相性 <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${compats.length}名 / 全${state.members.length}名)</span></h3>
+      <h3 style="font-size:14px;font-weight:700;margin:0;">🔗 既存メンバーとの相性 <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${compats.length}名 / 全${members.length}名)</span></h3>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:#6B7280;">🏢 会社で絞込:</span>
+        <span style="font-size:11px;color:#6B7280;">🏢 表示する会社（クリックで切替）:</span>
         ${allCompanies.map(c=>{
-          const on=hasFilter?!!compatFilter[c]:true;
-          return `<button onclick="toggleCompatCompany('${esc(c)}')" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${on?'#C45A95':'#D1D5DB'};background:${on?'#FBE5F0':'#fff'};color:${on?'#A03D78':'#9CA3AF'};cursor:pointer;font-weight:${on?'600':'400'};">${on?'✓':' '} ${esc(c)}</button>`;
+          const on=!compatHide[c];
+          return `<button onclick="toggleCompatCompany('${esc(c)}')" title="${on?'クリックで非表示':'クリックで表示'}" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${on?'#C45A95':'#D1D5DB'};background:${on?'#FBE5F0':'#fff'};color:${on?'#A03D78':'#9CA3AF'};cursor:pointer;font-weight:${on?'600':'400'};${on?'':'text-decoration:line-through;'}">${on?'✓':'✕'} ${esc(c)}</button>`;
         }).join('')}
-        ${hasFilter?`<button onclick="resetCompatFilter()" style="font-size:11px;padding:4px 8px;border:none;background:transparent;color:#6B7280;cursor:pointer;text-decoration:underline;">全表示に戻す</button>`:''}
+        ${hasHidden?`<button onclick="resetCompatFilter()" style="font-size:11px;padding:4px 8px;border:none;background:transparent;color:#6B7280;cursor:pointer;text-decoration:underline;">全表示に戻す</button>`:''}
       </div>
     </div>
+    ${compats.length===0?`<p style="font-size:12px;color:#9CA3AF;margin:0;text-align:center;padding:16px 0;">表示中のメンバーがいません。上のボタンで表示する会社を選択してください。</p>`:''}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
     ${compats.map(({m,r})=>{
       const color=r.score>=8?'green':r.score>=6?'blue':r.score>=4?'yellow':'red';
@@ -1325,11 +1332,11 @@ function generateAdvice(sc,compats,flags){
 
 function getAllPeople(){
   const people=[];
-  state.submissions.forEach(s=>{
+  activeSubmissions().forEach(s=>{
     const sc=calcScores(s.answers);
     people.push({id:'c:'+s.id,refId:s.id,type:'candidate',name:s.name,subtitle:'候補者',traits:sc.traits,risks:sc.risks,drives:sc.drives});
   });
-  state.members.forEach(m=>{
+  activeMembers().forEach(m=>{
     people.push({id:'m:'+m.id,refId:m.id,type:'member',name:m.name,subtitle:m.company+(m.isBenchmark?' ★':''),isBenchmark:m.isBenchmark,traits:m.traits,risks:m.risks||{},drives:m.drives||{money:25,prestige:25,freedom:25,relation:25}});
   });
   return people;
@@ -1471,12 +1478,12 @@ function renderMembersView(){
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <div>
         <h2 style="font-size:20px;font-weight:700;margin:0 0 4px;">既存メンバー（マスター）</h2>
-        <p style="font-size:13px;color:#6B7280;margin:0;">相性計算の基準となる既存メンバー（${state.members.length}名）。議事録ベースの初期データ。</p>
+        <p style="font-size:13px;color:#6B7280;margin:0;">相性計算の基準となる既存メンバー（${activeMembers().length}名）。議事録ベースの初期データ。</p>
       </div>
       <button class="btn-primary" style="font-size:13px;padding:10px 16px;" onclick="addMember()">＋ メンバー追加</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
-    ${state.members.map(m=>`
+    ${activeMembers().map(m=>`
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:start;">
           <div>
@@ -1714,8 +1721,9 @@ function importCode(){
 }
 
 function deleteSubmission(id){
-  if(!confirm('この提出を削除しますか？'))return;
-  state.submissions=state.submissions.filter(s=>s.id!==id);
+  if(!confirm('この提出を削除しますか？\n（削除は全端末に同期されます）'))return;
+  const s=state.submissions.find(x=>x.id===id);
+  if(s){s.deleted=true;touchEntity(s);}
   saveState();setView('list');
 }
 
@@ -1779,7 +1787,7 @@ function m_update(id,k,v){const m=state.members.find(x=>x.id===id);if(m){m[k]=v;
 function m_setTrait(id,k,v){const m=state.members.find(x=>x.id===id);if(m){m.traits[k]=parseFloat(v);saveState();}}
 function m_setRisk(id,k,v){const m=state.members.find(x=>x.id===id);if(m){m.risks[k]=parseFloat(v);saveState();}}
 function m_setDrive(id,k,v){const m=state.members.find(x=>x.id===id);if(m){if(!m.drives)m.drives={};m.drives[k]=parseFloat(v);saveState();}}
-function m_delete(id){if(!confirm('削除しますか？'))return;state.members=state.members.filter(x=>x.id!==id);saveState();render();}
+function m_delete(id){if(!confirm('削除しますか？\n（削除は全端末に同期されます）'))return;const m=state.members.find(x=>x.id===id);if(m){m.deleted=true;touchEntity(m);}saveState();render();}
 
 function initCharts(){
   document.querySelectorAll('canvas[data-scores]').forEach(c=>{
