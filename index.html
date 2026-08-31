@@ -78,11 +78,6 @@ function getBackendUrl(){
   return CONFIG.backendUrl||settings.backendUrl||'';
 }
 
-// 既存メンバーの会社フィルタ（詳細画面で使用）: {会社名:true}=非表示
-function loadCompatFilter(){try{return JSON.parse(localStorage.getItem('yst-compat-hide'))||{};}catch(e){return {};}}
-function saveCompatFilter(f){try{localStorage.setItem('yst-compat-hide',JSON.stringify(f));}catch(e){}}
-function toggleCompatCompany(c){const f=loadCompatFilter();if(f[c])delete f[c];else f[c]=true;saveCompatFilter(f);render();}
-function resetCompatFilter(){try{localStorage.removeItem('yst-compat-hide');}catch(e){}render();}
 function isLoggedIn(){return !!(settings&&settings.userName&&settings.loginAt);}
 
 function loadSettings(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY))||{};}catch(e){return{};}}
@@ -733,7 +728,7 @@ function renderLogin(){
         <button class="btn-primary btn-block" onclick="doLogin()">ログイン →</button>
         ${getBackendUrl()?`<p style="font-size:11px;color:#10B981;margin:12px 0 0;text-align:center;">✓ チーム共有モード（全員でデータを共有）</p>`:`<p style="font-size:11px;color:#F59E0B;margin:12px 0 0;text-align:center;">⚠ バックエンド未設定</p>`}
       </div>
-      <div style="text-align:center;margin-top:20px;font-size:11px;color:#9CA3AF;">${esc(CONFIG.appName)} v7.6<br>© YS Talent</div>
+      <div style="text-align:center;margin-top:20px;font-size:11px;color:#9CA3AF;">${esc(CONFIG.appName)} v7.7<br>© YS Talent</div>
     </div>
   </div>`;
 }
@@ -1145,13 +1140,8 @@ function renderDetail(){
   const sc=calcScores(s.answers);
   const total=avg(Object.values(sc.traits));
   const flags=detectFlags(sc,(typeof s!=="undefined"?s.answers:null));
-  // 会社フィルタを適用（{会社名:true}=非表示。クリックで表示/非表示をトグル）
-  const compatHide=loadCompatFilter();
-  const members=activeMembers();
-  const allCompanies=[...new Set(members.map(m=>m.company||'(未設定)'))];
-  const hasHidden=allCompanies.some(c=>compatHide[c]);
-  const filteredMembers=members.filter(m=>!compatHide[m.company||'(未設定)']);
-  const compats=filteredMembers.map(m=>({m,r:calcCompatibility(sc,m)})).sort((a,b)=>b.r.score-a.r.score);
+  // v7.7: 相性表示は診断結果画面から撤去（相性ラボ＝相性マトリクスタブで測定する仕様）
+  const compats=[];
   // セクションごとに回答整理
   const bySection={};
   QUESTIONS.forEach(q=>{
@@ -1224,39 +1214,12 @@ function renderDetail(){
     </div>
   </div>
 
-  <div class="card" style="margin-bottom:16px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-      <h3 style="font-size:14px;font-weight:700;margin:0;">🔗 既存メンバーとの相性 <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${compats.length}名 / 全${members.length}名)</span></h3>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:#6B7280;">🏢 表示する会社（クリックで切替）:</span>
-        ${allCompanies.map(c=>{
-          const on=!compatHide[c];
-          return `<button onclick="toggleCompatCompany('${esc(c)}')" title="${on?'クリックで非表示':'クリックで表示'}" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${on?'#C45A95':'#D1D5DB'};background:${on?'#FBE5F0':'#fff'};color:${on?'#A03D78':'#9CA3AF'};cursor:pointer;font-weight:${on?'600':'400'};${on?'':'text-decoration:line-through;'}">${on?'✓':'✕'} ${esc(c)}</button>`;
-        }).join('')}
-        ${hasHidden?`<button onclick="resetCompatFilter()" style="font-size:11px;padding:4px 8px;border:none;background:transparent;color:#6B7280;cursor:pointer;text-decoration:underline;">全表示に戻す</button>`:''}
-      </div>
+  <div class="card no-print" style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+      <h3 style="font-size:14px;font-weight:700;margin:0 0 4px;">🔬 相性マッチング</h3>
+      <p style="font-size:12px;color:#6B7280;margin:0;">相性の測定・比較は「相性マトリクス」ページで行います。</p>
     </div>
-    ${compats.length===0?`<p style="font-size:12px;color:#9CA3AF;margin:0;text-align:center;padding:16px 0;">表示中のメンバーがいません。上のボタンで表示する会社を選択してください。</p>`:''}
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
-    ${compats.map(({m,r})=>{
-      const color=r.score>=8?'green':r.score>=6?'blue':r.score>=4?'yellow':'red';
-      const bg=r.score>=8?'#D1FAE5':r.score>=6?'#DBEAFE':r.score>=4?'#FEF3C7':'#FEE2E2';
-      return `
-      <div style="border:1px solid #E5E7EB;border-radius:10px;padding:12px;background:${bg};">
-        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px;">
-          <div>
-            <strong style="font-size:14px;">${esc(m.name)}</strong>
-            <span style="font-size:11px;color:#6B7280;">（${esc(m.company)}）</span>
-            ${m.isBenchmark?'<span class="tag tag-green" style="margin-left:4px;">★基準</span>':''}
-          </div>
-          <div style="font-size:18px;font-weight:800;color:#1F2937;">${r.score.toFixed(1)}<span style="font-size:11px;color:#9CA3AF;">/10</span></div>
-        </div>
-        ${r.positives.length>0?`<p style="font-size:11px;color:#065F46;margin:6px 0 2px;"><strong>👍</strong> ${r.positives.join('、')}</p>`:''}
-        ${r.risks.length>0?`<p style="font-size:11px;color:#991B1B;margin:2px 0;"><strong>⚠</strong> ${r.risks.join('、')}</p>`:''}
-        <p style="font-size:11px;color:#374151;margin:6px 0 0;padding-top:6px;border-top:1px solid rgba(0,0,0,.08);"><strong>推奨:</strong> ${r.advice}</p>
-      </div>`;
-    }).join('')}
-    </div>
+    <button class="btn-primary" style="font-size:13px;padding:10px 16px;" onclick="openMatcherWith('c:${s.id}')">この候補者の相性を測定 →</button>
   </div>
 
   <div class="card" style="margin-bottom:16px;">
@@ -1380,6 +1343,8 @@ function calcPairCompat(a,b){
 
 let matcherSel={};
 function toggleMatcherSel(id){if(matcherSel[id])delete matcherSel[id];else matcherSel[id]=true;render();}
+// 詳細画面から「この候補者の相性を測定」で遷移（対象を選択済みにして相性ラボを開く）
+function openMatcherWith(id){matcherSel={};matcherSel[id]=true;setView('matrix');}
 function matcherSelectAll(type){const ppl=getAllPeople();ppl.forEach(p=>{if(!type||p.type===type)matcherSel[p.id]=true;});render();}
 function matcherClearAll(){matcherSel={};render();}
 
