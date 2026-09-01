@@ -284,13 +284,13 @@ Q('q10','2','Anda berkenalan dengan orang baru. Biasanya…','新しい人と出
 
 //----- セクション3: Respons Stres (ストレス対処) -----
 Q('q11','3','Anda gagal dalam ujian penting. Reaksi pertama?','大切な試験に落ちた時の最初の反応',[
-  ['Langsung berpikir bagaimana memperbaiki','すぐ改善策を考える',{resil:2,consc:1}],
+  ['Langsung berpikir bagaimana memperbaiki','すぐ改善策を考える',{resil:2,consc:1,emo:1}],
   ['Sedih sebentar, lalu coba lagi','少し落ち込んでから再挑戦',{resil:1}],
   ['Marah pada diri sendiri atau orang lain','自分や他人に怒り',{emo:-2,resil:-1}],
   ['Menyerah, cari jalan lain','諦めて別の道を探す',{resil:-2,long:-1}]
 ]),
 Q('q12','3','Atasan memarahi Anda di depan rekan. Anda…','上司に同僚の前で叱られたとき',[
-  ['Terima saran dan berusaha perbaiki','受け止めて改善努力',{resil:2,agree:1,rule:1}],
+  ['Terima saran dan berusaha perbaiki','受け止めて改善努力',{resil:2,agree:1,rule:1,emo:1}],
   ['Kecewa tapi tetap profesional','がっかりしつつもプロらしく振る舞う',{emo:2,resil:1}],
   ['Malu dan tidak mood seharian','恥ずかしくて一日不機嫌',{emo:-1}],
   ['Marah dan ingin pulang','怒って帰りたくなる',{emo:-2,resil:-2}]
@@ -442,7 +442,7 @@ Q('q35','8','Berapa persen gaji akan Anda kirim ke keluarga?','給料の何%を�
 // 仕事と関係ない深層動機を露わにする質問。考えず直感で答える形式
 Q('q36','9','Yang paling Anda BENCI?','一番嫌なのは？',[
   ['Menjadi miskin','貧乏になること',{money_d:3,fin:-1}],
-  ['Diremehkan / dipandang rendah','バカにされること',{prestige_d:3,emo:-1,revenge:1}],
+  ['Diremehkan / dipandang rendah','バカにされること',{prestige_d:3,revenge:1}],
   ['Kehilangan kebebasan','自由がないこと',{freedom_d:3,rule:-1,agree:-1}],
   ['Sendirian','一人になること',{relation_d:3,extra:1,fam:1}]
 ]),
@@ -459,8 +459,8 @@ Q('q38','9','Yang paling tidak bisa Anda MAAFKAN?','一番許せないのは？'
   ['Kalah / dikalahkan','負けること',{revenge:2,prestige_d:1,resil:-1}]
 ]),
 Q('q39','9','Yang paling TIDAK Anda kuasai?','一番苦手なのは？',[
-  ['Menunggu','待つこと',{impulse:2,emo:-1}],
-  ['Bersabar / menahan diri','我慢すること',{impulse:2,resil:-2,emo:-1}],
+  ['Menunggu','待つこと',{impulse:2}],
+  ['Bersabar / menahan diri','我慢すること',{impulse:2,resil:-2}],
   ['Minta maaf','謝ること',{integ:-1,prestige_d:2,agree:-1}],
   ['Mengikuti pendapat orang','人に合わせること',{agree:-2,freedom_d:1}]
 ]),
@@ -468,7 +468,7 @@ Q('q40','9','Kapan hati Anda paling LEMAH?','一番心が弱くなるのは？',
   ['Saat kesepian','寂しい時',{relation_d:2,extra:-1}],
   ['Saat lelah','疲れている時',{resil:-1}],
   ['Saat tidak ada uang','お金がない時',{money_d:2,fin:-1}],
-  ['Saat diremehkan','バカにされた時',{prestige_d:2,emo:-1,revenge:1}]
+  ['Saat diremehkan','バカにされた時',{prestige_d:2,revenge:1}]
 ]),
 Q('q41','9','Yang paling MEMALUKAN bagi Anda?','一番恥ずかしいのは？',[
   ['Gagal di depan orang banyak','人前で失敗すること',{prestige_d:2,resil:-1}],
@@ -477,10 +477,10 @@ Q('q41','9','Yang paling MEMALUKAN bagi Anda?','一番恥ずかしいのは？',
   ['Dianggap tidak punya teman','友達がいないと思われること',{relation_d:2,extra:1}]
 ]),
 Q('q42','9','Yang paling membuat Anda JENGKEL?','一番イライラするのは？',[
-  ['Orang yang lambat','遅い人',{impulse:2,emo:-1}],
+  ['Orang yang lambat','遅い人',{impulse:2}],
   ['Orang yang sombong','偉そうな人',{prestige_d:1,revenge:1}],
   ['Orang yang melanggar aturan','ルールを守らない人',{rule:2,integ:1}],
-  ['Orang yang merendahkan saya','自分を見下す人',{prestige_d:2,revenge:2,emo:-1}]
+  ['Orang yang merendahkan saya','自分を見下す人',{prestige_d:2,revenge:2}]
 ]),
 Q('q43','9','Yang paling tidak ingin Anda JADI?','一番なりたくないのは？',[
   ['Orang lemah','弱い人',{prestige_d:1}],
@@ -564,17 +564,16 @@ function calcScores(answers){
       if(k in d)d[k]+=v;
     });
   });
-  // 0-10に正規化（各特性の最大ポイントから）
+  // 0-10に正規化。v7.8: 加点は「加点の満点」、減点は「減点の満点」を分母にする
+  // （旧方式は加減点の絶対値合計が分母だったため、減点専用問がある特性は満点でも10に届かなかった）
+  const normOne=(v,key)=>{
+    if(v>=0){const pos=Math.max(2,maxPossible(key,1));return Math.min(10,5+(v/pos)*5);}
+    const neg=Math.max(2,maxPossible(key,-1));return Math.max(0,5+(v/neg)*5);
+  };
   const norm={};
-  Object.keys(TRAITS).forEach(k=>{
-    const max=Math.max(2,maxPossible(k));
-    norm[k]=Math.max(0,Math.min(10,(t[k]/max)*5+5));
-  });
+  Object.keys(TRAITS).forEach(k=>{norm[k]=normOne(t[k],k);});
   const normR={};
-  Object.keys(RISKS).forEach(k=>{
-    const max=Math.max(2,maxPossible(k));
-    normR[k]=Math.max(0,Math.min(10,(r[k]/max)*5+5));
-  });
+  Object.keys(RISKS).forEach(k=>{normR[k]=normOne(r[k],k);});
   // ドライブは合計を100%で正規化
   const driveTotal=Object.values(d).reduce((a,b)=>a+Math.max(0,b),0);
   const normD={};
@@ -584,12 +583,13 @@ function calcScores(answers){
   });
   return{traits:norm,risks:normR,drives:normD,raw:t,rawRisks:r,rawDrives:d};
 }
-function maxPossible(key){
+// 方向別の満点: dir=1 で全問加点最大を取った合計、dir=-1 で全問減点最大の合計（絶対値）
+function maxPossible(key,dir){
   let s=0;
   QUESTIONS.forEach(q=>{
     if(q.type==='text')return;
     let m=0;
-    q.options.forEach(o=>{m=Math.max(m,Math.abs((o.s||{})[key]||0));});
+    q.options.forEach(o=>{const v=(o.s||{})[key]||0;m=Math.max(m,dir<0?-v:v);});
     s+=m;
   });
   return s;
@@ -728,7 +728,7 @@ function renderLogin(){
         <button class="btn-primary btn-block" onclick="doLogin()">ログイン →</button>
         ${getBackendUrl()?`<p style="font-size:11px;color:#10B981;margin:12px 0 0;text-align:center;">✓ チーム共有モード（全員でデータを共有）</p>`:`<p style="font-size:11px;color:#F59E0B;margin:12px 0 0;text-align:center;">⚠ バックエンド未設定</p>`}
       </div>
-      <div style="text-align:center;margin-top:20px;font-size:11px;color:#9CA3AF;">${esc(CONFIG.appName)} v7.7<br>© YS Talent</div>
+      <div style="text-align:center;margin-top:20px;font-size:11px;color:#9CA3AF;">${esc(CONFIG.appName)} v7.8<br>© YS Talent</div>
     </div>
   </div>`;
 }
