@@ -630,6 +630,39 @@ function detectFlags(scores,answers){
   return f;
 }
 
+// v7.9: 相対評価（全提出者の中での位置づけ）。スコア計算自体には影響しない表示用レイヤー
+function traitStatsAll(){
+  const subs=dedupSubmissions(activeSubmissions());
+  const rows=subs.map(s=>{const tr=calcScores(s.answers).traits;return{id:s.id,traits:tr,total:avg(Object.values(tr))};});
+  const byTrait={};
+  Object.keys(TRAITS).forEach(k=>{
+    const vals=rows.map(x=>x.traits[k]);
+    const n=vals.length;
+    const mean=n?vals.reduce((a,b)=>a+b,0)/n:0;
+    const sd=n>1?Math.sqrt(vals.reduce((a,b)=>a+(b-mean)*(b-mean),0)/n):0;
+    byTrait[k]={vals,mean,sd};
+  });
+  return{byTrait,rows,n:rows.length};
+}
+// ある特性値の相対位置（上位%・偏差値）。母数3名未満はnull
+function relInfo(stats,k,v){
+  if(!stats||stats.n<3)return null;
+  const st=stats.byTrait[k];
+  const below=st.vals.filter(x=>x<v-1e-9).length;
+  const eq=st.vals.filter(x=>Math.abs(x-v)<=1e-9).length;
+  const topPct=Math.max(1,Math.round((1-(below+0.5*eq)/stats.n)*100));
+  const dev=st.sd>0.05?Math.round(50+10*(v-st.mean)/st.sd):50;
+  return{topPct,dev};
+}
+// 集団平均から最も乖離した特性（一覧カードの特徴バッジ用）
+function traitHighlights(stats,traits){
+  if(!stats||stats.n<3)return{strong:[],weak:[]};
+  const diffs=Object.keys(TRAITS).map(k=>({k,d:traits[k]-stats.byTrait[k].mean}));
+  const strong=diffs.filter(x=>x.d>=1).sort((a,b)=>b.d-a.d).slice(0,2).map(x=>TRAITS[x.k].ja);
+  const weak=diffs.filter(x=>x.d<=-1).sort((a,b)=>a.d-b.d).slice(0,1).map(x=>TRAITS[x.k].ja);
+  return{strong,weak};
+}
+
 // 動機ドライブから候補者タイプを判定
 function getDriveType(drives){
   const max=Object.entries(drives).sort((a,b)=>b[1]-a[1])[0];
@@ -728,7 +761,7 @@ function renderLogin(){
         <button class="btn-primary btn-block" onclick="doLogin()">ログイン →</button>
         ${getBackendUrl()?`<p style="font-size:11px;color:#10B981;margin:12px 0 0;text-align:center;">✓ チーム共有モード（全員でデータを共有）</p>`:`<p style="font-size:11px;color:#F59E0B;margin:12px 0 0;text-align:center;">⚠ バックエンド未設定</p>`}
       </div>
-      <div style="text-align:center;margin-top:20px;font-size:11px;color:#9CA3AF;">${esc(CONFIG.appName)} v7.8<br>© YS Talent</div>
+      <div style="text-align:center;margin-top:20px;font-size:11px;color:#9CA3AF;">${esc(CONFIG.appName)} v7.9<br>© YS Talent</div>
     </div>
   </div>`;
 }
@@ -1109,10 +1142,11 @@ function renderListView(){
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
-    ${dedupSubmissions(subs).map(s=>{
+    ${(()=>{const stats=traitStatsAll();return dedupSubmissions(subs).map(s=>{
       const sc=calcScores(s.answers);
       const total=avg(Object.values(sc.traits));
       const flags=detectFlags(sc,(typeof s!=="undefined"?s.answers:null));
+      const hl=traitHighlights(stats,sc.traits);
       return `
       <div class="card" style="cursor:pointer;" onclick="showDetail('${s.id}')">
         <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px;">
@@ -1128,9 +1162,10 @@ function renderListView(){
         </div>
         <div class="score-bar-bg" style="margin-bottom:10px;"><div class="score-bar-fill" style="width:${total*10}%;"></div></div>
         ${flags.length>0?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;">${flags.slice(0,3).map(f=>`<span class="tag tag-${f.level==='red'?'red':'yellow'}">${esc(f.label)}</span>`).join('')}${flags.length>3?`<span class="tag tag-gray">+${flags.length-3}</span>`:''}</div>`:'<div style="font-size:11px;color:#10B981;font-weight:600;">✓ 主要リスクなし</div>'}
+        ${(hl.strong.length||hl.weak.length)?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">${hl.strong.map(x=>`<span class="tag tag-blue">💪 ${esc(x)}</span>`).join('')}${hl.weak.map(x=>`<span class="tag tag-gray">▲ ${esc(x)}低め</span>`).join('')}</div>`:''}
         ${(()=>{const ot=calcOvertimeStats(s);if(ot.total===0)return '';const overpct=ot.count/ot.total*100;const t=overpct>40?'red':overpct>20?'yellow':'green';const label=overpct>40?'熟考型（直感弱）':overpct>20?'やや熟考型':'直感型';return `<div style="margin-top:6px;font-size:10px;color:#6B7280;">⏱ 平均${ot.avg}秒 / 超過${ot.count}問 <span class="tag tag-${t}" style="font-size:9px;padding:1px 6px;margin-left:4px;">${label}</span></div>`;})()}
       </div>`;
-    }).join('')}
+    }).join('');})()}
     </div>`;
 }
 
@@ -1142,6 +1177,10 @@ function renderDetail(){
   const flags=detectFlags(sc,(typeof s!=="undefined"?s.answers:null));
   // v7.7: 相性表示は診断結果画面から撤去（相性ラボ＝相性マトリクスタブで測定する仕様）
   const compats=[];
+  // v7.9: 相対評価（全提出者内での位置づけ）
+  const stats=traitStatsAll();
+  const rank=stats.n>=3?1+stats.rows.filter(r=>r.total>total+1e-9).length:null;
+  const avgTraits=stats.n>=3?Object.fromEntries(Object.keys(TRAITS).map(k=>[k,Math.round(stats.byTrait[k].mean*100)/100])):null;
   // セクションごとに回答整理
   const bySection={};
   QUESTIONS.forEach(q=>{
@@ -1167,6 +1206,7 @@ function renderDetail(){
         <div style="font-size:11px;color:#A03D78;font-weight:600;">総合スコア</div>
         <div style="font-size:32px;font-weight:800;color:#C45A95;line-height:1;">${total.toFixed(1)}</div>
         <div style="font-size:11px;color:#A03D78;">/ 10</div>
+        ${rank?`<div style="font-size:10px;color:#A03D78;margin-top:4px;border-top:1px solid #E8B7D4;padding-top:4px;">全${stats.n}名中 <strong>${rank}位</strong></div>`:''}
       </div>
     </div>
   </div>
@@ -1198,19 +1238,21 @@ function renderDetail(){
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;" id="grid-charts">
     <div class="card">
-      <h3 style="font-size:14px;font-weight:700;margin:0 0 10px;">📊 12特性レーダーチャート</h3>
-      <canvas id="trait-radar" data-scores='${JSON.stringify(sc.traits)}'></canvas>
+      <h3 style="font-size:14px;font-weight:700;margin:0 0 10px;">📊 12特性レーダーチャート${avgTraits?` <span style="font-size:10px;color:#9CA3AF;font-weight:400;">（点線＝全候補者平均）</span>`:''}</h3>
+      <canvas id="trait-radar" data-scores='${JSON.stringify(sc.traits)}' ${avgTraits?`data-avg='${JSON.stringify(avgTraits)}'`:''}></canvas>
     </div>
     <div class="card">
-      <h3 style="font-size:14px;font-weight:700;margin:0 0 10px;">📈 特性スコア（高い順）</h3>
-      ${Object.entries(sc.traits).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`
+      <h3 style="font-size:14px;font-weight:700;margin:0 0 10px;">📈 特性スコア（高い順）${stats.n>=3?` <span style="font-size:10px;color:#9CA3AF;font-weight:400;">相対値は全${stats.n}名比</span>`:''}</h3>
+      ${Object.entries(sc.traits).sort((a,b)=>b[1]-a[1]).map(([k,v])=>{
+        const ri=relInfo(stats,k,v);
+        return `
         <div style="margin-bottom:8px;">
           <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px;">
-            <span>${TRAITS[k].ja}</span><span style="font-weight:600;">${v.toFixed(1)}</span>
+            <span>${TRAITS[k].ja}</span><span><span style="font-weight:600;">${v.toFixed(1)}</span>${ri?`<span style="font-size:10px;color:${ri.dev>=60?'#059669':ri.dev<=40?'#DC2626':'#9CA3AF'};margin-left:6px;">上位${ri.topPct}%・偏差値${ri.dev}</span>`:''}</span>
           </div>
           <div class="score-bar-bg"><div class="score-bar-fill" style="width:${v*10}%;"></div></div>
-        </div>
-      `).join('')}
+        </div>`;
+      }).join('')}
     </div>
   </div>
 
@@ -1760,10 +1802,19 @@ function initCharts(){
     const scores=JSON.parse(c.dataset.scores);
     const labels=Object.keys(scores).map(k=>TRAITS[k]?TRAITS[k].ja:k);
     const data=Object.values(scores);
+    const datasets=[{label:'この候補者',data,backgroundColor:'rgba(196,90,149,.2)',borderColor:'#C45A95',borderWidth:2,pointBackgroundColor:'#C45A95',pointRadius:3}];
+    let hasAvg=false;
+    if(c.dataset.avg){
+      try{
+        const av=JSON.parse(c.dataset.avg);
+        datasets.push({label:'全候補者平均',data:Object.keys(scores).map(k=>av[k]!=null?av[k]:5),backgroundColor:'transparent',borderColor:'#9CA3AF',borderWidth:1.5,borderDash:[5,4],pointRadius:0});
+        hasAvg=true;
+      }catch(e){}
+    }
     c._chart=new Chart(c,{
       type:'radar',
-      data:{labels,datasets:[{label:'スコア',data,backgroundColor:'rgba(196,90,149,.2)',borderColor:'#C45A95',borderWidth:2,pointBackgroundColor:'#C45A95',pointRadius:3}]},
-      options:{responsive:true,plugins:{legend:{display:false}},scales:{r:{min:0,max:10,beginAtZero:true,ticks:{stepSize:2,backdropColor:'transparent',font:{size:9}},pointLabels:{font:{size:10}}}}}
+      data:{labels,datasets},
+      options:{responsive:true,plugins:{legend:{display:hasAvg,labels:{font:{size:10},boxWidth:14}}},scales:{r:{min:0,max:10,beginAtZero:true,ticks:{stepSize:2,backdropColor:'transparent',font:{size:9}},pointLabels:{font:{size:10}}}}}
     });
   });
 }
